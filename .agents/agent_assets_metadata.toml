@@ -1,0 +1,8 @@
+uploads = []
+outputs = []
+
+[[generated]]
+id = "lseWwujP-Mkwdb1bNymCs"
+uri = "file://artifacts/chasehq/assets/images/icon.png"
+type = "image"
+title = "chasehq app icon"

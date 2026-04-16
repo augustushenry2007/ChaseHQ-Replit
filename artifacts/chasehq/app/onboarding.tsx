@@ -18,35 +18,35 @@ import { useColors } from "@/hooks/useColors";
 const Q0 = {
   label: "Just checking in",
   question: "When it comes to money conversations, I feel…",
-  sub: "Select all that apply.",
+  sub: "Select all that apply, or add your own.",
+  placeholder: "e.g. stressed, resentful, powerless…",
   options: [
     { id: "anxious", label: "Anxious", detail: "I overthink every interaction and second-guess myself" },
     { id: "guilty", label: "Guilty", detail: "Like I shouldn't be asking for what I'm already owed" },
     { id: "frustrated", label: "Frustrated", detail: "It's exhausting and draining to deal with every time" },
-    { id: "embarrassed", label: "Embarrassed", detail: "I feel awkward bringing money up with clients" },
   ],
 };
 
 const Q1 = {
   label: "A little more",
   question: "When I think about sending a follow-up…",
-  sub: "Tick everything that rings true.",
+  sub: "Tick everything that rings true, or describe it yourself.",
+  placeholder: "e.g. I freeze up, I feel embarrassed…",
   options: [
     { id: "hesitant", label: "I hesitate", detail: "I draft it five times and then don't send any of them" },
     { id: "relationship", label: "I worry", detail: "What if it damages the relationship or makes me look desperate?" },
     { id: "procrastinate", label: "I put it off", detail: "Until it's awkward to bring up and I've lost the moment" },
-    { id: "forget", label: "I forget", detail: "It falls off my radar and weeks pass before I notice" },
   ],
 };
 
 const Q2 = {
   label: "Last one",
   question: "What would actually make this easier?",
-  sub: "Choose as many as feel right.",
+  sub: "Choose as many as feel right, or say it your way.",
+  placeholder: "e.g. templates, a nudge, less guilt…",
   options: [
     { id: "words", label: "The right words", detail: "Already written — so I never stare at a blank screen again" },
     { id: "timing", label: "The right moment", detail: "Knowing exactly when to reach out without overthinking it" },
-    { id: "confidence", label: "Less anxiety", detail: "Knowing it's handled — and I don't have to think about it" },
     { id: "automation", label: "Full automation", detail: "Set it and forget it — no manual effort from me at all" },
   ],
 };
@@ -70,15 +70,17 @@ export default function OnboardingScreen() {
   const [selected0, setSelected0] = useState<Set<string>>(new Set());
   const [selected1, setSelected1] = useState<Set<string>>(new Set());
   const [selected2, setSelected2] = useState<Set<string>>(new Set());
-  const [customEmotion0, setCustomEmotion0] = useState("");
+  const [custom0, setCustom0] = useState("");
+  const [custom1, setCustom1] = useState("");
+  const [custom2, setCustom2] = useState("");
   const [connectedIntegrations, setConnectedIntegrations] = useState<Set<string>>(new Set());
 
   const progress = (step / TOTAL_STEPS) * 100;
 
   function canAdvance() {
-    if (step === 0) return selected0.size > 0 || customEmotion0.trim().length > 0;
-    if (step === 1) return selected1.size > 0;
-    if (step === 2) return selected2.size > 0;
+    if (step === 0) return selected0.size > 0 || custom0.trim().length > 0;
+    if (step === 1) return selected1.size > 0 || custom1.trim().length > 0;
+    if (step === 2) return selected2.size > 0 || custom2.trim().length > 0;
     return step < TOTAL_STEPS;
   }
 
@@ -110,7 +112,7 @@ export default function OnboardingScreen() {
 
   function buildFeelingLabel() {
     const labels = Array.from(selected0).map((id) => Q0.options.find((o) => o.id === id)?.label.toLowerCase() ?? id);
-    if (customEmotion0.trim()) labels.push(customEmotion0.trim().toLowerCase());
+    if (custom0.trim()) labels.push(custom0.trim().toLowerCase());
     if (labels.length === 0) return "";
     if (labels.length === 1) return labels[0];
     if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
@@ -118,9 +120,19 @@ export default function OnboardingScreen() {
   }
 
   const feelingLabel = buildFeelingLabel();
-
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const bottomPad = Platform.OS === "web" ? 34 : insets.bottom;
+
+  function makeToggle(setter: React.Dispatch<React.SetStateAction<Set<string>>>) {
+    return (id: string) => {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      setter((prev) => {
+        const n = new Set(prev);
+        if (n.has(id)) n.delete(id); else n.add(id);
+        return n;
+      });
+    };
+  }
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -156,17 +168,11 @@ export default function OnboardingScreen() {
             <MultiSelectStep
               config={Q0}
               selected={selected0}
-              onToggle={(id) => {
-                setSelected0((prev) => {
-                  const n = new Set(prev);
-                  if (n.has(id)) n.delete(id); else n.add(id);
-                  return n;
-                });
-              }}
+              onToggle={makeToggle(setSelected0)}
               onNext={next}
               canGo={canAdvance()}
-              customText={customEmotion0}
-              setCustomText={setCustomEmotion0}
+              customText={custom0}
+              setCustomText={setCustom0}
               colors={colors}
             />
           )}
@@ -175,15 +181,11 @@ export default function OnboardingScreen() {
             <MultiSelectStep
               config={Q1}
               selected={selected1}
-              onToggle={(id) => {
-                setSelected1((prev) => {
-                  const n = new Set(prev);
-                  if (n.has(id)) n.delete(id); else n.add(id);
-                  return n;
-                });
-              }}
+              onToggle={makeToggle(setSelected1)}
               onNext={next}
-              canGo={selected1.size > 0}
+              canGo={canAdvance()}
+              customText={custom1}
+              setCustomText={setCustom1}
               colors={colors}
             />
           )}
@@ -192,15 +194,11 @@ export default function OnboardingScreen() {
             <MultiSelectStep
               config={Q2}
               selected={selected2}
-              onToggle={(id) => {
-                setSelected2((prev) => {
-                  const n = new Set(prev);
-                  if (n.has(id)) n.delete(id); else n.add(id);
-                  return n;
-                });
-              }}
+              onToggle={makeToggle(setSelected2)}
               onNext={next}
-              canGo={selected2.size > 0}
+              canGo={canAdvance()}
+              customText={custom2}
+              setCustomText={setCustom2}
               colors={colors}
             />
           )}
@@ -215,7 +213,7 @@ export default function OnboardingScreen() {
                 </View>
               )}
               <Text style={[styles.empathyText, { color: colors.mutedForeground }]}>
-                {selected0.size > 1
+                {selected0.size + (custom0.trim() ? 1 : 0) > 1
                   ? "You're not carrying just one thing. That combination makes sense — and it's more common than you'd think."
                   : selected0.has("anxious")
                   ? "That anxiety isn't a flaw. It means you care about how you come across."
@@ -367,8 +365,8 @@ function MultiSelectStep({
   onToggle: (id: string) => void;
   onNext: () => void;
   canGo: boolean;
-  customText?: string;
-  setCustomText?: (text: string) => void;
+  customText: string;
+  setCustomText: (text: string) => void;
   colors: ReturnType<typeof useColors>;
 }) {
   return (
@@ -383,10 +381,7 @@ function MultiSelectStep({
           return (
             <TouchableOpacity
               key={o.id}
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                onToggle(o.id);
-              }}
+              onPress={() => onToggle(o.id)}
               style={[styles.optionCard, { borderColor: active ? colors.primary : colors.border, backgroundColor: active ? colors.accent : colors.muted }]}
               testID={`option-${o.id}`}
             >
@@ -402,25 +397,24 @@ function MultiSelectStep({
         })}
       </View>
 
-      {selected.size > 0 && (
+      <View style={[styles.customInputWrapper, { borderColor: customText.trim().length > 0 ? colors.primary : colors.border, backgroundColor: colors.muted }]}>
+        <Feather name="edit-2" size={13} color={customText.trim().length > 0 ? colors.primary : colors.mutedForeground} style={{ marginTop: 1 }} />
+        <TextInput
+          value={customText}
+          onChangeText={setCustomText}
+          placeholder={config.placeholder}
+          placeholderTextColor={colors.mutedForeground}
+          style={[styles.customInput, { color: colors.foreground }]}
+          multiline
+        />
+      </View>
+
+      {(selected.size > 0 || customText.trim().length > 0) && (
         <View style={[styles.selectedCount, { backgroundColor: colors.muted }]}>
           <Feather name="check-square" size={12} color={colors.primary} />
           <Text style={[styles.selectedCountText, { color: colors.primary }]}>
-            {selected.size} selected
+            {selected.size + (customText.trim().length > 0 ? 1 : 0)} selected
           </Text>
-        </View>
-      )}
-
-      {setCustomText !== undefined && (
-        <View style={{ marginTop: 14 }}>
-          <Text style={[styles.label, { color: colors.mutedForeground, fontSize: 11, marginBottom: 8 }]}>Or describe it in your own words:</Text>
-          <TextInput
-            value={customText ?? ""}
-            onChangeText={setCustomText}
-            placeholder="Type your own reason..."
-            placeholderTextColor={colors.mutedForeground}
-            style={[styles.textInput, { borderColor: colors.border, backgroundColor: colors.muted, color: colors.foreground }]}
-          />
         </View>
       )}
 
@@ -431,7 +425,7 @@ function MultiSelectStep({
         testID="thats-me-btn"
       >
         <Text style={[styles.primaryBtnText, { color: canGo ? "#FFF" : colors.mutedForeground }]}>
-          {selected.size > 1 ? "That's me — all of it" : "That's me"}
+          {selected.size + (customText.trim().length > 0 ? 1 : 0) > 1 ? "That's me — all of it" : "That's me"}
         </Text>
         <Feather name="arrow-right" size={16} color={canGo ? "#FFF" : colors.mutedForeground} />
       </TouchableOpacity>
@@ -454,9 +448,10 @@ const styles = StyleSheet.create({
   checkbox: { width: 18, height: 18, borderRadius: 5, borderWidth: 2, marginTop: 1, flexShrink: 0, alignItems: "center", justifyContent: "center" },
   optionLabel: { fontSize: 14, fontFamily: "Inter_600SemiBold", marginBottom: 2 },
   optionDetail: { fontSize: 12, fontFamily: "Inter_400Regular", lineHeight: 17 },
+  customInputWrapper: { flexDirection: "row", alignItems: "flex-start", gap: 10, borderWidth: 1.5, borderRadius: 14, padding: 14, marginTop: 10 },
+  customInput: { flex: 1, fontSize: 13, fontFamily: "Inter_400Regular", lineHeight: 19, minHeight: 36 },
   selectedCount: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", borderRadius: 20, paddingHorizontal: 10, paddingVertical: 6, marginTop: 10 },
   selectedCountText: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
-  textInput: { borderWidth: 1.5, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14, fontFamily: "Inter_400Regular" },
   primaryBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderRadius: 12, paddingVertical: 14 },
   primaryBtnText: { fontSize: 15, fontFamily: "Inter_600SemiBold", color: "#FFFFFF" },
   pill: { alignSelf: "flex-start", borderRadius: 20, paddingHorizontal: 12, paddingVertical: 5, marginBottom: 14 },

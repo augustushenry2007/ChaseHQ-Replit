@@ -16,40 +16,61 @@ import * as Haptics from "expo-haptics";
 import { useColors } from "@/hooks/useColors";
 import { getInvoiceById, ACTIVITY, formatUSD, type Invoice, type InvoiceStatus } from "@/lib/data";
 
-const STATUS_STYLE: Record<InvoiceStatus, { bg: string; text: string; border: string }> = {
-  Escalated: { bg: "#FEE2E2", text: "#DC2626", border: "#FECACA" },
-  Overdue: { bg: "#FEF3C7", text: "#D97706", border: "#FDE68A" },
-  "Follow-up": { bg: "#FEF9C3", text: "#A16207", border: "#FEF08A" },
-  Upcoming: { bg: "#DBEAFE", text: "#2563EB", border: "#BFDBFE" },
-  Paid: { bg: "#DCFCE7", text: "#16A34A", border: "#BBF7D0" },
+const STATUS_STYLE: Record<InvoiceStatus, { bg: string; text: string; dot: string }> = {
+  Escalated: { bg: "#FEE2E2", text: "#DC2626", dot: "#DC2626" },
+  Overdue: { bg: "#FEF3C7", text: "#D97706", dot: "#F59E0B" },
+  "Follow-up": { bg: "#FEF9C3", text: "#A16207", dot: "#EAB308" },
+  Upcoming: { bg: "#DBEAFE", text: "#2563EB", dot: "#3B82F6" },
+  Paid: { bg: "#DCFCE7", text: "#16A34A", dot: "#22C55E" },
 };
 
 type Tone = "Polite" | "Friendly" | "Firm" | "Urgent";
 const TONES: Tone[] = ["Polite", "Friendly", "Firm", "Urgent"];
 
-type DotState = "done" | "active" | "pending" | "reply";
+type DotState = "done" | "active" | "pending" | "resolved";
 
-function getTimeline(invoice: Invoice) {
-  const base = [
-    { label: "Invoice sent", state: "done" as DotState },
-    { label: "1st reminder", state: "pending" as DotState },
-    { label: "2nd reminder", state: "pending" as DotState },
-    { label: "Final notice", state: "pending" as DotState },
-    { label: "Resolved", state: "pending" as DotState },
+interface TimelineEvent {
+  label: string;
+  date: string;
+  state: DotState;
+}
+
+function getDates(invoice: Invoice): string[] {
+  const due = new Date(invoice.dueDateISO);
+  const sentDate = new Date(due);
+  sentDate.setDate(sentDate.getDate() - 30);
+  const dates = [];
+  for (let i = 0; i < 5; i++) {
+    const d = new Date(sentDate);
+    d.setDate(d.getDate() + i * 7);
+    dates.push(d.toLocaleDateString("en-US", { month: "short", day: "numeric" }));
+  }
+  return dates;
+}
+
+function getTimeline(invoice: Invoice): TimelineEvent[] {
+  const dates = getDates(invoice);
+  const base: TimelineEvent[] = [
+    { label: "Invoice sent", date: dates[0], state: "done" },
+    { label: "1st reminder", date: dates[1], state: "pending" },
+    { label: "2nd reminder", date: dates[2], state: "pending" },
+    { label: "Final notice", date: dates[3], state: "pending" },
+    { label: "Resolved", date: "", state: "pending" },
   ];
 
-  let events = [...base];
-  if (invoice.status === "Paid") events = events.map((e) => ({ ...e, state: "done" as DotState }));
-  else if (invoice.status === "Escalated") events = events.map((e, i) => ({ ...e, state: (i < 4 ? "done" : "active") as DotState }));
-  else if (invoice.status === "Overdue") events = events.map((e, i) => ({ ...e, state: (i <= 1 ? "done" : i === 2 ? "active" : "pending") as DotState }));
-  else if (invoice.status === "Follow-up") events = events.map((e, i) => ({ ...e, state: (i === 0 ? "done" : i === 1 ? "active" : "pending") as DotState }));
-
-  if (invoice.clientReply) {
-    const replyEvent = { label: "Client replied", state: "reply" as DotState };
-    const lastDoneIdx = events.map((e) => e.state === "done").lastIndexOf(true);
-    events.splice(lastDoneIdx + 1, 0, replyEvent);
+  if (invoice.status === "Paid") {
+    return base.map((e) => ({ ...e, state: e.label === "Resolved" ? "resolved" : "done" }));
   }
-  return events;
+  if (invoice.status === "Escalated") {
+    return base.map((e, i) => ({ ...e, state: i < 4 ? "done" : "active" })) as TimelineEvent[];
+  }
+  if (invoice.status === "Overdue") {
+    return base.map((e, i) => ({ ...e, state: i <= 1 ? "done" : i === 2 ? "active" : "pending" })) as TimelineEvent[];
+  }
+  if (invoice.status === "Follow-up") {
+    return base.map((e, i) => ({ ...e, state: i === 0 ? "done" : i === 1 ? "active" : "pending" })) as TimelineEvent[];
+  }
+  return base;
 }
 
 function getDraft(invoice: Invoice, tone: Tone, variant: number): string {
@@ -60,8 +81,8 @@ function getDraft(invoice: Invoice, tone: Tone, variant: number): string {
       `Dear ${invoice.client},\n\nFollowing up on invoice ${invoice.id} for ${formatUSD(invoice.amount)}${invoice.daysPastDue > 0 ? `, now ${invoice.daysPastDue} days overdue` : ""}.\n\nCould you let me know when I might expect payment?\n\nThank you,\nJamie Doe`,
     ],
     Friendly: [
-      `Hi there,\n\nJust a quick reminder that invoice ${invoice.id} for ${formatUSD(invoice.amount)} is${invoice.daysPastDue > 0 ? ` now ${invoice.daysPastDue} days overdue` : ` due on ${invoice.dueDate}`}.\n\nCould you let me know if everything is in order?\n\nThanks,\nJamie`,
-      `Hey,\n\nChecking in on invoice ${invoice.id} for ${formatUSD(invoice.amount)} — just want to make sure it didn't slip through the cracks!\n\nLet me know if you need anything.\n\nCheers,\nJamie`,
+      `Hi there,\n\nJust a quick reminder that invoice ${invoice.id} for ${formatUSD(invoice.amount)} is${invoice.daysPastDue > 0 ? ` now ${invoice.daysPastDue} days overdue (due ${invoice.dueDate})` : ` due on ${invoice.dueDate}`}.\n\nCould you let me know if everything is in order?\n\nThanks,\nJamie`,
+      `Hey,\n\nChecking in on invoice ${invoice.id} for ${formatUSD(invoice.amount)} — just want to make sure it didn't slip through the cracks!\n\nLet me know if you need anything from my side.\n\nCheers,\nJamie`,
       `Hi ${invoice.client} team,\n\nHope all is well! Noticed invoice ${invoice.id} (${formatUSD(invoice.amount)}) hasn't come through yet. Happy to resend details if helpful.\n\nBest,\nJamie`,
     ],
     Firm: [
@@ -90,6 +111,7 @@ export default function InvoiceDetailScreen() {
   const [customDraft, setCustomDraft] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [sent, setSent] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(true);
 
   if (!invoice) {
     return (
@@ -118,19 +140,29 @@ export default function InvoiceDetailScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsGenerating(true);
     setCustomDraft(null);
-    setTimeout(() => {
-      setVariantIndex((v) => (v + 1) % 3);
-      setIsGenerating(false);
-    }, 800);
+    setTimeout(() => { setVariantIndex((v) => (v + 1) % 3); setIsGenerating(false); }, 800);
   }
 
   function handleSend() {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setSent(true);
-    setTimeout(() => setSent(false), 2000);
+    setTimeout(() => setSent(false), 2500);
   }
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
+
+  const detailRows = [
+    { label: "Invoice ID", value: invoice.id, color: colors.foreground },
+    { label: "Client", value: invoice.client, color: colors.foreground },
+    { label: "Email", value: invoice.clientEmail, color: colors.foreground },
+    { label: "Amount", value: formatUSD(invoice.amount), color: colors.foreground },
+    { label: "Due date", value: invoice.dueDate, color: colors.foreground },
+    ...(invoice.daysPastDue > 0
+      ? [{ label: "Overdue by", value: `${invoice.daysPastDue} days`, color: "#DC2626" }]
+      : []),
+    { label: "Sent from", value: invoice.sentFrom, color: colors.foreground },
+    { label: "Payment", value: invoice.paymentDetails, color: colors.foreground },
+  ];
 
   return (
     <ScrollView
@@ -138,78 +170,85 @@ export default function InvoiceDetailScreen() {
       contentContainerStyle={{ paddingBottom: 60 }}
       showsVerticalScrollIndicator={false}
     >
-      <View style={[styles.backRow, { paddingTop: topPad + 12 }]}>
+      <View style={[styles.topBar, { paddingTop: topPad + 12 }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} testID="back-btn">
-          <Feather name="arrow-left" size={16} color={colors.mutedForeground} />
-          <Text style={[styles.backText, { color: colors.mutedForeground }]}>Invoices</Text>
+          <Feather name="arrow-left" size={15} color={colors.mutedForeground} />
+          <Text style={[styles.backText, { color: colors.mutedForeground }]}>Back to Invoices</Text>
         </TouchableOpacity>
       </View>
 
       <View style={styles.px}>
-        <View style={styles.invoiceHeaderRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.invoiceId, { color: colors.mutedForeground }]}>{invoice.id}</Text>
-            <Text style={[styles.clientName, { color: colors.foreground }]}>{invoice.client}</Text>
-            <Text style={[styles.clientEmail, { color: colors.mutedForeground }]}>{invoice.clientEmail}</Text>
+        <View style={styles.heroRow}>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={[styles.heroClient, { color: colors.foreground }]} numberOfLines={1}>{invoice.client}</Text>
+            <Text style={[styles.heroDesc, { color: colors.mutedForeground }]} numberOfLines={1}>{invoice.description}</Text>
           </View>
-          <View style={[styles.statusBadge, { backgroundColor: statusStyle.bg, borderColor: statusStyle.border }]}>
-            <Text style={[styles.statusText, { color: statusStyle.text }]}>{invoice.status}</Text>
-          </View>
-        </View>
-
-        <View style={[styles.amountCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <View style={styles.amountRow}>
-            <Text style={[styles.amountLabel, { color: colors.mutedForeground }]}>Amount due</Text>
-            <Text style={[styles.amountValue, { color: colors.foreground }]}>{formatUSD(invoice.amount)}</Text>
-          </View>
-          <View style={[styles.divider, { backgroundColor: colors.border }]} />
-          <View style={styles.detailGrid}>
-            {[
-              { label: "Due date", value: invoice.dueDate },
-              { label: "Days overdue", value: invoice.daysPastDue > 0 ? `${invoice.daysPastDue} days` : "—" },
-              { label: "Description", value: invoice.description },
-              { label: "Payment", value: invoice.paymentDetails },
-            ].map((row) => (
-              <View key={row.label} style={styles.detailRow}>
-                <Text style={[styles.detailLabel, { color: colors.mutedForeground }]}>{row.label}</Text>
-                <Text style={[styles.detailValue, { color: colors.foreground }]}>{row.value}</Text>
-              </View>
-            ))}
+          <View style={{ alignItems: "flex-end", gap: 6 }}>
+            <Text style={[styles.heroAmount, { color: colors.foreground }]}>{formatUSD(invoice.amount)}</Text>
+            <View style={[styles.statusBadge, { backgroundColor: statusStyle.bg }]}>
+              <View style={[styles.statusDot, { backgroundColor: statusStyle.dot }]} />
+              <Text style={[styles.statusText, { color: statusStyle.text }]}>{invoice.status}</Text>
+            </View>
           </View>
         </View>
 
         {invoice.clientReply && (
-          <View style={[styles.replyCard, { backgroundColor: "#F0F9FF", borderColor: "#BAE6FD" }]}>
+          <View style={[styles.replyCard, { backgroundColor: "#EFF6FF", borderColor: "#BFDBFE" }]}>
             <View style={styles.replyCardHeader}>
-              <Feather name="message-square" size={14} color="#0369A1" />
+              <Feather name="message-square" size={13} color="#2563EB" />
               <Text style={styles.replyCardTitle}>Client replied · {invoice.clientReply.receivedAt}</Text>
             </View>
             <Text style={styles.replyCardText}>{invoice.clientReply.snippet}</Text>
           </View>
         )}
 
-        <View style={[styles.draftCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <View style={styles.draftHeader}>
-            <Text style={[styles.draftTitle, { color: colors.foreground }]}>Follow-up draft</Text>
-            <View style={[styles.toneToggle, { backgroundColor: colors.muted }]}>
-              {TONES.map((t) => (
-                <TouchableOpacity
-                  key={t}
-                  onPress={() => handleToneChange(t)}
-                  style={[styles.toneBtn, { backgroundColor: tone === t ? colors.dark : "transparent" }]}
-                  testID={`tone-${t}`}
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <TouchableOpacity
+            style={styles.cardCollapsibleHeader}
+            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setDetailsOpen((v) => !v); }}
+            testID="invoice-details-toggle"
+          >
+            <Text style={[styles.cardSectionTitle, { color: colors.foreground }]}>Invoice details</Text>
+            <Feather name={detailsOpen ? "chevron-up" : "chevron-down"} size={16} color={colors.mutedForeground} />
+          </TouchableOpacity>
+          {detailsOpen && (
+            <View style={[styles.detailsBody, { borderTopColor: colors.border }]}>
+              {detailRows.map((row, i) => (
+                <View
+                  key={row.label}
+                  style={[styles.detailRow, { borderBottomColor: colors.border, borderBottomWidth: i < detailRows.length - 1 ? 1 : 0 }]}
                 >
-                  <Text style={[styles.toneBtnText, { color: tone === t ? "#FFFFFF" : colors.mutedForeground }]}>{t}</Text>
-                </TouchableOpacity>
+                  <Text style={[styles.detailLabel, { color: colors.mutedForeground }]}>{row.label}</Text>
+                  <Text style={[styles.detailValue, { color: row.color, fontFamily: row.color === "#DC2626" ? "Inter_600SemiBold" : "Inter_400Regular" }]} numberOfLines={2}>
+                    {row.value}
+                  </Text>
+                </View>
               ))}
             </View>
+          )}
+        </View>
+
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.cardSectionTitle, { color: colors.foreground, paddingHorizontal: 16, paddingTop: 16, marginBottom: 12 }]}>Send follow-up</Text>
+          <View style={styles.toneRow}>
+            {TONES.map((t) => (
+              <TouchableOpacity
+                key={t}
+                onPress={() => handleToneChange(t)}
+                style={[styles.tonePill, {
+                  backgroundColor: tone === t ? colors.dark : "transparent",
+                  borderColor: tone === t ? colors.dark : colors.border,
+                }]}
+                testID={`tone-${t}`}
+              >
+                <Text style={[styles.tonePillText, { color: tone === t ? "#FFFFFF" : colors.foreground }]}>{t}</Text>
+              </TouchableOpacity>
+            ))}
           </View>
-          <Text style={[styles.draftMeta, { color: colors.mutedForeground }]}>
-            To: {invoice.clientEmail}  From: {invoice.sentFrom}
-          </Text>
-          <View style={styles.draftBody}>
+
+          <View style={styles.draftArea}>
             {isGenerating ? (
-              <View style={styles.generatingOverlay}>
+              <View style={styles.generatingBox}>
                 <ActivityIndicator color={colors.primary} />
                 <Text style={[styles.generatingText, { color: colors.primary }]}>Generating…</Text>
               </View>
@@ -218,68 +257,77 @@ export default function InvoiceDetailScreen() {
                 value={currentDraft}
                 onChangeText={(t) => setCustomDraft(t)}
                 multiline
-                style={[styles.draftInput, { color: colors.foreground, borderColor: colors.border }]}
+                scrollEnabled
+                style={[styles.draftInput, { color: colors.foreground }]}
                 textAlignVertical="top"
                 testID="draft-input"
               />
             )}
           </View>
+
           <View style={styles.draftActions}>
             <TouchableOpacity
-              style={[styles.regenerateBtn, { backgroundColor: "#F0F9FF", borderColor: "#BAE6FD" }]}
+              style={[styles.regenBtn, { borderColor: colors.border }]}
               onPress={handleRegenerate}
               disabled={isGenerating}
               testID="regenerate-btn"
             >
-              <Feather name="refresh-cw" size={12} color="#0369A1" />
-              <Text style={styles.regenerateText}>Regenerate</Text>
-              <Text style={styles.variantText}>{variantIndex + 1}/3</Text>
+              <Feather name="refresh-cw" size={13} color={colors.foreground} />
+              <Text style={[styles.regenText, { color: colors.foreground }]}>Regenerate</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.sendBtn, { backgroundColor: sent ? "#16A34A" : colors.dark }]}
               onPress={handleSend}
               testID="send-btn"
             >
-              <Text style={styles.sendBtnText}>{sent ? "Sent!" : "Send Follow-up"}</Text>
+              <Feather name="send" size={13} color="#FFFFFF" />
+              <Text style={styles.sendBtnText}>{sent ? "Sent!" : "Send follow-up"}</Text>
             </TouchableOpacity>
           </View>
         </View>
 
-        <View style={[styles.timelineCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Text style={[styles.timelineTitle, { color: colors.foreground }]}>Chase Timeline</Text>
-          <Text style={[styles.timelineSub, { color: colors.mutedForeground }]}>Automated follow-up sequence</Text>
-          <View style={{ marginTop: 16 }}>
-            {timeline.map((event, i) => (
-              <View key={i} style={styles.timelineItem}>
-                <View style={styles.timelineDotCol}>
-                  <TimelineDot state={event.state} colors={colors} />
-                  {i < timeline.length - 1 && (
-                    <View style={[styles.timelineLine, { backgroundColor: event.state === "done" || event.state === "reply" ? "#BBF7D0" : colors.border }]} />
-                  )}
-                </View>
-                <View style={[styles.timelineContent, { paddingBottom: i < timeline.length - 1 ? 24 : 0 }]}>
-                  <Text style={[styles.timelineLabel, { color: event.state === "pending" ? colors.mutedForeground : event.state === "reply" ? "#2563EB" : colors.foreground }]}>
-                    {event.label}
-                  </Text>
-                </View>
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, padding: 16 }]}>
+          <Text style={[styles.cardSectionTitle, { color: colors.foreground, marginBottom: 16 }]}>Chase timeline</Text>
+          {timeline.map((event, i) => (
+            <View key={i} style={styles.timelineItem}>
+              <View style={styles.timelineDotCol}>
+                <TimelineDot state={event.state} colors={colors} />
+                {i < timeline.length - 1 && (
+                  <View style={[styles.timelineLine, {
+                    backgroundColor: event.state === "done" ? "#86EFAC" : colors.border,
+                  }]} />
+                )}
               </View>
-            ))}
-          </View>
+              <View style={[styles.timelineContent, { paddingBottom: i < timeline.length - 1 ? 22 : 0 }]}>
+                <Text style={[styles.timelineLabel, {
+                  color: event.state === "resolved" ? colors.primary :
+                    event.state === "active" ? colors.primary :
+                    event.state === "done" ? colors.foreground : colors.mutedForeground,
+                  fontFamily: event.state === "resolved" ? "Inter_600SemiBold" : "Inter_600SemiBold",
+                }]}>{event.label}</Text>
+                {event.date.length > 0 && (
+                  <Text style={[styles.timelineDate, { color: colors.mutedForeground }]}>{event.date}</Text>
+                )}
+              </View>
+            </View>
+          ))}
         </View>
 
         {invoiceActivity.length > 0 && (
-          <View style={[styles.activityCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <Text style={[styles.timelineTitle, { color: colors.foreground }]}>Activity</Text>
+          <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, padding: 16 }]}>
+            <Text style={[styles.cardSectionTitle, { color: colors.foreground, marginBottom: 14 }]}>Activity</Text>
             {invoiceActivity.map((item, i) => (
               <View
                 key={item.id}
                 style={[styles.activityRow, { borderBottomColor: colors.border, borderBottomWidth: i < invoiceActivity.length - 1 ? 1 : 0 }]}
               >
-                <View style={[styles.activityDot, { backgroundColor: item.type === "reply" ? "#3B82F6" : colors.mutedForeground }]} />
-                <Text style={[styles.activityDesc, { color: item.type === "reply" ? "#1D4ED8" : colors.foreground }]} numberOfLines={2}>
-                  {item.description}
-                </Text>
-                <Text style={[styles.activityTime, { color: colors.mutedForeground }]}>{item.timeAgo}</Text>
+                <View style={[styles.activityDot, { backgroundColor: item.type === "reply" ? "#3B82F6" : "#94A3B8" }]} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.activityDesc, { color: colors.foreground }]} numberOfLines={2}>
+                    {item.description}
+                  </Text>
+                  <Text style={[styles.activityTime, { color: colors.mutedForeground }]}>{item.timeAgo}</Text>
+                </View>
               </View>
             ))}
           </View>
@@ -292,22 +340,18 @@ export default function InvoiceDetailScreen() {
 function TimelineDot({ state, colors }: { state: DotState; colors: ReturnType<typeof useColors> }) {
   if (state === "done") {
     return (
-      <View style={[styles.dot, { backgroundColor: "#DCFCE7", borderColor: "#BBF7D0" }]}>
+      <View style={[styles.dot, { backgroundColor: "#DCFCE7", borderColor: "#86EFAC" }]}>
         <Feather name="check" size={10} color="#16A34A" />
       </View>
     );
   }
-  if (state === "reply") {
-    return (
-      <View style={[styles.dot, { backgroundColor: "#DBEAFE", borderColor: "#BFDBFE" }]}>
-        <Feather name="message-square" size={10} color="#2563EB" />
-      </View>
-    );
+  if (state === "resolved") {
+    return <View style={[styles.dot, { backgroundColor: colors.primary, borderColor: colors.primary }]} />;
   }
   if (state === "active") {
-    return <View style={[styles.dot, { backgroundColor: "#3B82F6", borderColor: "#BFDBFE" }]} />;
+    return <View style={[styles.dot, { backgroundColor: colors.primary, borderColor: "#BAE6FD" }]} />;
   }
-  return <View style={[styles.dot, { backgroundColor: colors.muted, borderColor: colors.border }]} />;
+  return <View style={[styles.dot, { backgroundColor: "#FFFFFF", borderColor: colors.border }]} />;
 }
 
 const styles = StyleSheet.create({
@@ -315,58 +359,59 @@ const styles = StyleSheet.create({
   notFound: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
   notFoundText: { fontSize: 18, fontFamily: "Inter_600SemiBold" },
   backLink: { fontSize: 14, fontFamily: "Inter_500Medium" },
-  backRow: { paddingHorizontal: 16, marginBottom: 12 },
+  topBar: { paddingHorizontal: 16, paddingBottom: 14 },
   backBtn: { flexDirection: "row", alignItems: "center", gap: 6 },
   backText: { fontSize: 14, fontFamily: "Inter_500Medium" },
   px: { paddingHorizontal: 16 },
-  invoiceHeaderRow: { flexDirection: "row", alignItems: "flex-start", marginBottom: 16 },
-  invoiceId: { fontSize: 12, fontFamily: "Inter_400Regular", marginBottom: 3 },
-  clientName: { fontSize: 22, fontFamily: "Inter_700Bold", marginBottom: 2 },
-  clientEmail: { fontSize: 13, fontFamily: "Inter_400Regular" },
-  statusBadge: { borderRadius: 20, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 5 },
-  statusText: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
-  amountCard: { borderRadius: 14, borderWidth: 1, padding: 16, marginBottom: 14 },
-  amountRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
-  amountLabel: { fontSize: 13, fontFamily: "Inter_500Medium" },
-  amountValue: { fontSize: 24, fontFamily: "Inter_700Bold" },
-  divider: { height: 1, marginBottom: 12 },
-  detailGrid: { gap: 8 },
-  detailRow: { flexDirection: "row", justifyContent: "space-between" },
-  detailLabel: { fontSize: 13, fontFamily: "Inter_400Regular" },
-  detailValue: { fontSize: 13, fontFamily: "Inter_500Medium", flex: 1, textAlign: "right", marginLeft: 12 },
-  replyCard: { borderRadius: 12, borderWidth: 1, padding: 14, marginBottom: 14 },
-  replyCardHeader: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 8 },
-  replyCardTitle: { fontSize: 12, fontFamily: "Inter_600SemiBold", color: "#0369A1" },
+  heroRow: { flexDirection: "row", alignItems: "flex-start", gap: 12, marginBottom: 14 },
+  heroClient: { fontSize: 22, fontFamily: "Inter_700Bold", marginBottom: 3 },
+  heroDesc: { fontSize: 13, fontFamily: "Inter_400Regular" },
+  heroAmount: { fontSize: 22, fontFamily: "Inter_700Bold" },
+  statusBadge: { flexDirection: "row", alignItems: "center", gap: 5, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 },
+  statusDot: { width: 6, height: 6, borderRadius: 3 },
+  statusText: { fontSize: 12, fontFamily: "Inter_600SemiBold" },
+  replyCard: { borderRadius: 12, borderWidth: 1, padding: 14, marginBottom: 12 },
+  replyCardHeader: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 },
+  replyCardTitle: { fontSize: 12, fontFamily: "Inter_600SemiBold", color: "#2563EB" },
   replyCardText: { fontSize: 13, fontFamily: "Inter_400Regular", color: "#0F172A", lineHeight: 19 },
-  draftCard: { borderRadius: 14, borderWidth: 1, padding: 16, marginBottom: 14 },
-  draftHeader: { marginBottom: 10 },
-  draftTitle: { fontSize: 15, fontFamily: "Inter_700Bold", marginBottom: 10 },
-  toneToggle: { flexDirection: "row", borderRadius: 8, overflow: "hidden", alignSelf: "flex-start" },
-  toneBtn: { paddingHorizontal: 10, paddingVertical: 6 },
-  toneBtnText: { fontSize: 12, fontFamily: "Inter_500Medium" },
-  draftMeta: { fontSize: 11, fontFamily: "Inter_400Regular", marginBottom: 10 },
-  draftBody: { minHeight: 140, marginBottom: 12 },
-  generatingOverlay: { flex: 1, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8, minHeight: 140 },
+  card: {
+    borderRadius: 14,
+    borderWidth: 1,
+    marginBottom: 12,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  cardCollapsibleHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 16, paddingVertical: 14 },
+  cardSectionTitle: { fontSize: 15, fontFamily: "Inter_700Bold" },
+  detailsBody: { borderTopWidth: 1 },
+  detailRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", paddingHorizontal: 16, paddingVertical: 11, gap: 16 },
+  detailLabel: { fontSize: 13, fontFamily: "Inter_400Regular", flex: 1 },
+  detailValue: { fontSize: 13, flex: 1.4, textAlign: "right" },
+  toneRow: { flexDirection: "row", gap: 8, paddingHorizontal: 16, flexWrap: "wrap", marginBottom: 14 },
+  tonePill: { borderWidth: 1.5, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 7 },
+  tonePillText: { fontSize: 13, fontFamily: "Inter_500Medium" },
+  draftArea: { marginHorizontal: 16, marginBottom: 12, borderRadius: 10, borderWidth: 1, borderColor: "#E2E8F0", backgroundColor: "#FFFFFF", minHeight: 150, overflow: "hidden" },
+  draftInput: { padding: 14, fontSize: 13, fontFamily: "Inter_400Regular", lineHeight: 20, minHeight: 150 },
+  generatingBox: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, minHeight: 150 },
   generatingText: { fontSize: 14, fontFamily: "Inter_500Medium" },
-  draftInput: { fontSize: 13, fontFamily: "Inter_400Regular", lineHeight: 20, borderWidth: 1, borderRadius: 10, padding: 12 },
-  draftActions: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  regenerateBtn: { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: 8, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 8 },
-  regenerateText: { fontSize: 12, fontFamily: "Inter_600SemiBold", color: "#0369A1" },
-  variantText: { fontSize: 11, fontFamily: "Inter_400Regular", color: "#60A5FA" },
-  sendBtn: { borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10 },
+  draftActions: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingBottom: 16, gap: 10 },
+  regenBtn: { flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1.5, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 9 },
+  regenText: { fontSize: 13, fontFamily: "Inter_500Medium" },
+  sendBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7, borderRadius: 20, paddingVertical: 11 },
   sendBtnText: { fontSize: 14, fontFamily: "Inter_600SemiBold", color: "#FFFFFF" },
-  timelineCard: { borderRadius: 14, borderWidth: 1, padding: 16, marginBottom: 14 },
-  timelineTitle: { fontSize: 14, fontFamily: "Inter_700Bold" },
-  timelineSub: { fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 2 },
-  timelineItem: { flexDirection: "row", gap: 12 },
-  timelineDotCol: { alignItems: "center", width: 20 },
-  dot: { width: 20, height: 20, borderRadius: 10, borderWidth: 1, alignItems: "center", justifyContent: "center" },
-  timelineLine: { width: 2, flex: 1, marginTop: 2 },
+  timelineItem: { flexDirection: "row", gap: 14 },
+  timelineDotCol: { alignItems: "center", width: 22 },
+  dot: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, alignItems: "center", justifyContent: "center" },
+  timelineLine: { width: 2, flex: 1, marginTop: 3 },
   timelineContent: { flex: 1 },
-  timelineLabel: { fontSize: 13, fontFamily: "Inter_600SemiBold", lineHeight: 20 },
-  activityCard: { borderRadius: 14, borderWidth: 1, padding: 16, marginBottom: 14 },
-  activityRow: { flexDirection: "row", alignItems: "flex-start", paddingVertical: 10, gap: 10 },
-  activityDot: { width: 6, height: 6, borderRadius: 3, marginTop: 6, flexShrink: 0 },
-  activityDesc: { flex: 1, fontSize: 12, fontFamily: "Inter_400Regular", lineHeight: 18 },
-  activityTime: { fontSize: 11, fontFamily: "Inter_400Regular", flexShrink: 0 },
+  timelineLabel: { fontSize: 14, lineHeight: 22 },
+  timelineDate: { fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 1 },
+  activityRow: { flexDirection: "row", alignItems: "flex-start", paddingVertical: 11, gap: 12 },
+  activityDot: { width: 7, height: 7, borderRadius: 4, marginTop: 5, flexShrink: 0 },
+  activityDesc: { fontSize: 13, fontFamily: "Inter_400Regular", lineHeight: 19 },
+  activityTime: { fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 2 },
 });

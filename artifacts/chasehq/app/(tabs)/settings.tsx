@@ -17,7 +17,7 @@ import * as Haptics from "expo-haptics";
 import { useColors } from "@/hooks/useColors";
 import { useApp } from "@/context/AppContext";
 
-type SectionKey = "profile" | "notifications" | "schedule" | null;
+type SectionKey = "profile" | "notifications" | "schedule" | "integrations" | null;
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -103,39 +103,41 @@ export default function SettingsScreen() {
           <ScheduleSection schedule={schedule} updateSchedule={updateSchedule} colors={colors} />
         </CollapsibleSection>
 
-        <View style={[styles.integCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <View style={styles.integHeader}>
-            <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Integrations</Text>
-            <Text style={[styles.sectionSub, { color: colors.mutedForeground }]}>Active connections</Text>
+        <CollapsibleSection
+          title="Integrations"
+          subtitle={connectedIntegrations.length > 0 ? `${connectedIntegrations.length} active connection${connectedIntegrations.length > 1 ? "s" : ""}` : "Connect your invoicing tools"}
+          isOpen={openSection === "integrations"}
+          onToggle={() => toggleSection("integrations")}
+          colors={colors}
+        >
+          <View style={{ marginHorizontal: -16, marginBottom: -16 }}>
+            {connectedIntegrations.map((integ, i) => (
+              <IntegrationRow
+                key={integ.id}
+                integration={integ}
+                onToggle={() => toggleIntegration(integ.id)}
+                colors={colors}
+                showBorder={i < connectedIntegrations.length - 1 || unconnectedIntegrations.length > 0}
+              />
+            ))}
+            {unconnectedIntegrations.length > 0 && (
+              <View>
+                <Text style={[styles.addToolLabel, { color: colors.mutedForeground, borderTopColor: connectedIntegrations.length > 0 ? colors.border : "transparent" }]}>
+                  ADD ANOTHER TOOL
+                </Text>
+                {unconnectedIntegrations.map((integ, i) => (
+                  <IntegrationRow
+                    key={integ.id}
+                    integration={integ}
+                    onToggle={() => toggleIntegration(integ.id)}
+                    colors={colors}
+                    showBorder={i < unconnectedIntegrations.length - 1}
+                  />
+                ))}
+              </View>
+            )}
           </View>
-
-          {connectedIntegrations.map((integ, i) => (
-            <IntegrationRow
-              key={integ.id}
-              integration={integ}
-              onToggle={() => toggleIntegration(integ.id)}
-              colors={colors}
-              showBorder={i < connectedIntegrations.length - 1 || unconnectedIntegrations.length > 0}
-            />
-          ))}
-
-          {unconnectedIntegrations.length > 0 && (
-            <View>
-              <Text style={[styles.addToolLabel, { color: colors.mutedForeground, borderTopColor: colors.border }]}>
-                ADD ANOTHER TOOL
-              </Text>
-              {unconnectedIntegrations.map((integ, i) => (
-                <IntegrationRow
-                  key={integ.id}
-                  integration={integ}
-                  onToggle={() => toggleIntegration(integ.id)}
-                  colors={colors}
-                  showBorder={i < unconnectedIntegrations.length - 1}
-                />
-              ))}
-            </View>
-          )}
-        </View>
+        </CollapsibleSection>
       </View>
 
       <View style={styles.bottomActions}>
